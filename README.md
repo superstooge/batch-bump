@@ -48,19 +48,19 @@ From the root of this script repo:
 
 # Install packages (e.g. lodash and dayjs)
 
-`node batch-install-and-push.js install lodash dayjs`
+`node batch install lodash dayjs`
 
 # Or using shorthand
 
-`node batch-install-and-push.js i lodash dayjs`
+`node batch i lodash dayjs`
 
 # Remove packages (e.g. lodash and dayjs)
 
-`node batch-install-and-push.js remove lodash dayjs`
+`node batch remove lodash dayjs`
 
 # Or using shorthand
 
-`node batch-install-and-push.js rm lodash dayjs`
+`node batch rm lodash dayjs`
 
 📌 Notes
 
