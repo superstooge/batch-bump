@@ -3,3 +3,4 @@ DS_Store
 .env
 .vscode
 logs
+repos.json
