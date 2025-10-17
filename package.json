@@ -7,8 +7,5 @@
   },
   "author": "",
   "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "@tanstack/react-query": "^5.90.5"
-  }
+  "description": ""
 }
