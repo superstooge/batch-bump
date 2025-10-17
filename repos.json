@@ -1,8 +1,37 @@
 {
+  "basePath": "/Users/federicocarbone/Projects/",
   "repositories": [
     {
-      "path": "/Users/federicocarbone/Projects/batch-bump",
-      "branch": "feat/test-branch"
+      "name": "web-trs",
+      "branch": "feat/nav-drawer"
+    },
+    {
+      "name": "web-account",
+      "branch": "feat/new-globalnav"
+    },
+    {
+      "name": "web-onehub-wallet",
+      "branch": "feat/new-globalnav"
+    },
+    {
+      "name": "web-profile",
+      "branch": "feat/new-globalnav"
+    },
+    {
+      "name": "web-recognition",
+      "branch": "feat/new-globalnav"
+    },
+    {
+      "name": "web-discounts",
+      "branch": "feat/new-globalnav"
+    },
+    {
+      "name": "web-reward",
+      "branch": "feat/new-globalnav"
+    },
+    {
+      "name": "web-home",
+      "branch": "feat/new-globalnav"
     }
   ]
 }
