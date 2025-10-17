@@ -15,7 +15,7 @@ Pushes changes to the specified branch
 📁 Project Structure
 .
 ```
-├── batch-install-and-push.js # The main script
+├── batch.js # The main script
 └── repos.json # Repository config file
 ```
 
