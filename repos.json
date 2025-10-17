@@ -1,0 +1,8 @@
+{
+  "repositories": [
+    {
+      "path": "/Users/federicocarbone/Projects/batch-bump",
+      "branch": "feat/test-branch"
+    }
+  ]
+}
