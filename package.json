@@ -9,7 +9,6 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@tanstack/react-query": "^5.90.5",
-    "typescript": "^5.9.3"
+    "@tanstack/react-query": "^5.90.5"
   }
 }
