@@ -1,6 +1,5 @@
 const fs = require("fs");
 const path = require("path");
-const { execSync } = require("child_process");
 
 const util = require("util");
 const exec = util.promisify(require("child_process").exec);
@@ -30,7 +29,7 @@ async function processRepo(
 
   const run = async (cmd) => {
     try {
-      const { stdout = "", stderr = "" } = await exec(cmd);
+      const { stdout = "", stderr = "" } = await exec(cmd, { cwd: repoPath });
       const out = [stdout, stderr].filter(Boolean).join("\n").trim();
 
       if (verbose && out) console.log(out);
@@ -59,8 +58,6 @@ async function processRepo(
   }
 
   try {
-    process.chdir(repoPath);
-
     if (branchName) {
       await run(`git checkout -B ${branchName}`);
     }
