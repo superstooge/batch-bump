@@ -1,158 +1,107 @@
+#!/usr/bin/env node
+
 const fs = require("fs");
 const path = require("path");
-const { execSync } = require("child_process");
+
+const { Command } = require("commander");
 const { printSummary } = require("./printSummary");
+const cliProgress = require("cli-progress");
+const pLimit = require("p-limit").default;
+const { processRepo } = require("./processRepo");
 
-// Parse CLI args
-const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
-const skipPush = args.includes("--skip-push");
-
-const cleanArgs = args.filter(
-  (arg) => arg !== "--dry-run" && arg !== "--skip-push"
-);
-const [action, ...packages] = cleanArgs;
-
-if (
-  !["install", "i", "remove", "rm"].includes(action) ||
-  packages.length === 0
-) {
-  console.error(`❌ Usage:
-  node batch install <pkg> [more...] [--dry-run] [--skip-push]
-  node batch remove <pkg> [more...] [--dry-run] [--skip-push]`);
-  process.exit(1);
+const logsDir = path.resolve(__dirname, "logs");
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir);
 }
 
-const command = ["install", "i"].includes(action) ? "install" : "uninstall";
-
-// Load config
-const config = JSON.parse(fs.readFileSync("repos.json", "utf-8"));
-const basePath = config.basePath;
-
-if (!basePath) {
-  console.error('❌ Missing "basePath" in repos.json');
-  process.exit(1);
-}
-
-// 🟩 Collect results here
+const program = new Command();
 const results = [];
 
-config.repositories.forEach((repo) => {
-  const repoPath = path.resolve(basePath, repo.name);
-  const branchName = repo.branch;
+program
+  .name("batch")
+  .description("Bulk install/remove npm packages across multiple repos")
+  .version("1.0.0");
 
-  console.log(`\n📦 Repo: ${repo.name}`);
-  console.log(`📂 Path: ${repoPath}`);
+program
+  .command("install")
+  .alias("i")
+  .description("Install packages in all repos")
+  .argument("<packages...>", "Packages to install")
+  .option("--dry-run", "Simulate the actions without executing them")
+  .option("--skip-push", "Do everything except git push")
+  .option("--parallel", "Run tasks in parallel")
+  .option("--verbose", "Enable verbose logging in the terminal")
+  .action(async (packages, options) => {
+    await handleRepos("install", packages, options);
+  });
 
-  if (dryRun) {
-    console.log(`🔍 DRY RUN: Would checkout/create branch "${branchName}"`);
-    console.log(`🔍 DRY RUN: Would run "npm ${command} ${packages.join(" ")}"`);
-    if (!skipPush) {
-      console.log(`🔍 DRY RUN: Would push branch "${branchName}"`);
-    } else {
-      console.log(`🛑 Skipping push (flag --skip-push)`);
-    }
+program
+  .command("remove")
+  .alias("rm")
+  .description("Remove packages from all repos")
+  .argument("<packages...>", "Packages to remove")
+  .option("--dry-run", "Simulate the actions without executing them")
+  .option("--skip-push", "Do everything except git push")
+  .option("--parallel", "Run tasks in parallel")
+  .option("--verbose", "Enable verbose logging in the terminal")
+  .action(async (packages, options) => {
+    await handleRepos("uninstall", packages, options);
+  });
 
-    results.push({
-      name: repo.name,
-      status: "☑️ DRY RUN",
-      message: `Would ${command} ${packages.join(
-        ", "
-      )} on branch ${branchName}`,
-    });
+program.parse(process.argv);
 
-    return;
+async function handleRepos(
+  command,
+  packages,
+  { dryRun, skipPush, parallel, verbose }
+) {
+  const config = JSON.parse(fs.readFileSync("repos.json", "utf-8"));
+  const basePath = config.basePath;
+
+  if (!basePath) {
+    console.error('❌ Missing "basePath" in repos.json');
+    process.exit(1);
   }
 
-  try {
-    process.chdir(repoPath);
+  const bar = new cliProgress.SingleBar(
+    {
+      format: "📦 {bar} {percentage}% | {value}/{total} | {repo}",
+      barCompleteChar: "█",
+      barIncompleteChar: "░",
+      hideCursor: true,
+    },
+    cliProgress.Presets.shades_classic
+  );
 
-    if (branchName) {
-      execSync(`git checkout -B ${branchName}`, { stdio: "inherit" });
-    }
+  const concurrentCount = parallel ? 5 : 1;
 
-    execSync(`npm ${command} ${packages.join(" ")}`, { stdio: "inherit" });
-    execSync("git add package.json package-lock.json", { stdio: "inherit" });
+  console.warn(
+    `\n\r ${
+      parallel ? "⚡ Running in parallel mode" : "🐢 Running in sequential mode"
+    }${parallel ? `: concurrent tasks limit is ${concurrentCount}` : ""}\n\r`
+  );
 
-    const commitPrefix = command === "install" ? "Install" : "Remove";
-    let commitOutput = "";
-
-    try {
-      commitOutput = execSync(
-        `git commit -m "${commitPrefix}: ${packages.join(", ")}" --no-verify`,
-        { encoding: "utf8" } // capture output instead of piping it
-      );
-
-      console.log(commitOutput.trim());
-
-      if (!skipPush) {
-        execSync(`git push --set-upstream origin ${branchName} --no-verify`, {
-          stdio: "inherit",
-        });
-      } else {
-        console.log("🛑 Skipping push (flag --skip-push)");
-      }
-
-      results.push({
-        name: repo.name,
-        status: "✅ Success",
-        message: `Committed on ${branchName}`,
-      });
-    } catch (commitErr) {
-      // Capture stdout from failed commit
-      const output = commitErr.stdout?.toString() || "";
-
-      if (
-        output.includes("nothing to commit") ||
-        output.includes("no changes added to commit")
-      ) {
-        console.warn(`⚠️  No changes to commit in ${repo.name}`);
-
-        results.push({
-          name: repo.name,
-          status: "☑️ Skipped",
-          message: "No changes to commit",
-        });
-        return;
-      }
-
-      throw commitErr; // rethrow real errors
-    }
-
-    if (!skipPush) {
-      execSync(`git push --set-upstream origin ${branchName} --no-verify`, {
-        stdio: "inherit",
-      });
-    } else {
-      console.log("🛑 Skipping push (flag --skip-push)");
-    }
-
-    results.push({
-      name: repo.name,
-      status: "✅ Success",
-      message: `Committed on ${branchName}`,
-    });
-
-    console.log(`✅ Done with ${repo.name}`);
-  } catch (err) {
-    if (err.message.indexOf("nothing to commit, working tree clean") > -1) {
-      results.push({
-        name: repo.name,
-        status: "⚠️ No Changes",
-        message: `No changes to commit on ${branchName}`,
-      });
-      console.warn(`⚠️ No Changes in ${repo.name}: skipping`);
-      return;
-    }
-    results.push({
-      name: repo.name,
-      status: "❌ Error",
-      message: err.message.split("\n")[0],
-    });
-
-    console.error(`❌ Error in ${repo.name}: ${err.message}`);
+  if (!verbose) {
+    bar.start(config.repositories.length, 0, { repo: "" });
   }
-});
 
-// 🟦 Print summary table
-printSummary(results);
+  const limit = pLimit(concurrentCount);
+
+  const tasks = config.repositories.map((repo) =>
+    limit(() =>
+      processRepo(
+        repo,
+        command,
+        packages,
+        { dryRun, skipPush, bar, verbose },
+        basePath,
+        results
+      )
+    )
+  );
+
+  Promise.all(tasks).then(() => {
+    bar.stop();
+    printSummary(results);
+  });
+}
