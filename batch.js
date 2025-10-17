@@ -1,17 +1,26 @@
 const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
+const { printSummary } = require("./printSummary");
 
-// Parse CLI arguments
-const [, , action, ...packages] = process.argv;
+// Parse CLI args
+const args = process.argv.slice(2);
+const dryRun = args.includes("--dry-run");
+const skipPush = args.includes("--skip-push");
+
+// Remove flags from args
+const cleanArgs = args.filter(
+  (arg) => arg !== "--dry-run" && arg !== "--skip-push"
+);
+const [action, ...packages] = cleanArgs;
 
 if (
   !["install", "i", "remove", "rm"].includes(action) ||
   packages.length === 0
 ) {
   console.error(`❌ Usage:
-  node batch-install-and-push.js install <pkg> [more...]
-  node batch-install-and-push.js remove <pkg> [more...]`);
+  node batch-install-and-push.js install <pkg> [more...] [--dry-run] [--skip-push]
+  node batch-install-and-push.js remove <pkg> [more...] [--dry-run] [--skip-push]`);
   process.exit(1);
 }
 
@@ -30,33 +39,47 @@ config.repositories.forEach((repo) => {
   const repoPath = path.resolve(basePath, repo.name);
   const branchName = repo.branch;
 
-  console.log(`\n📦 Processing: ${repo.name}`);
-  console.log(`📂 Full path: ${repoPath}`);
-
-  process.chdir(repoPath);
+  console.log(`\n📦 Repo: ${repo.name}`);
+  console.log(`📂 Path: ${repoPath}`);
+  if (dryRun) {
+    console.log(`🔍 DRY RUN: Would checkout/create branch "${branchName}"`);
+    console.log(`🔍 DRY RUN: Would run "npm ${command} ${packages.join(" ")}"`);
+    console.log(
+      `🔍 DRY RUN: Would commit changes with message "${
+        command === "install" ? "Install" : "Remove"
+      }: ${packages.join(", ")}"`
+    );
+    if (!skipPush) {
+      console.log(`🔍 DRY RUN: Would push branch "${branchName}"`);
+    } else {
+      console.log(`🛑 Skipping push (flag --skip-push)`);
+    }
+    return;
+  }
 
   try {
+    process.chdir(repoPath);
+
     if (branchName) {
-      console.log(`➡️  Checking out/creating branch: ${branchName}`);
       execSync(`git checkout -B ${branchName}`, { stdio: "inherit" });
     }
 
-    console.log(`🛠️  Running: npm ${command} ${packages.join(" ")}`);
     execSync(`npm ${command} ${packages.join(" ")}`, { stdio: "inherit" });
 
     execSync("git add package.json package-lock.json", { stdio: "inherit" });
 
     const commitPrefix = command === "install" ? "Install" : "Remove";
-    execSync(
-      `git commit -m "${commitPrefix}: ${packages.join(", ")}" --no-verify`,
-      {
-        stdio: "inherit",
-      }
-    );
-
-    execSync(`git push --set-upstream origin ${branchName} --no-verify`, {
+    execSync(`git commit -m "${commitPrefix}: ${packages.join(", ")}"`, {
       stdio: "inherit",
     });
+
+    if (!skipPush) {
+      execSync(`git push --set-upstream origin ${branchName}`, {
+        stdio: "inherit",
+      });
+    } else {
+      console.log("🛑 Skipping push (flag --skip-push)");
+    }
 
     console.log(`✅ Done with ${repo.name}`);
   } catch (err) {
@@ -65,3 +88,5 @@ config.repositories.forEach((repo) => {
 });
 
 console.log("\n🏁 All repositories processed.");
+
+printSummary(results);
