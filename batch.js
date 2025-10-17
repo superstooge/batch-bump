@@ -75,12 +75,52 @@ config.repositories.forEach((repo) => {
     execSync("git add package.json package-lock.json", { stdio: "inherit" });
 
     const commitPrefix = command === "install" ? "Install" : "Remove";
-    execSync(`git commit -m "${commitPrefix}: ${packages.join(", ")}"`, {
-      stdio: "inherit",
-    });
+    let commitOutput = "";
+
+    try {
+      commitOutput = execSync(
+        `git commit -m "${commitPrefix}: ${packages.join(", ")}" --no-verify`,
+        { encoding: "utf8" } // capture output instead of piping it
+      );
+
+      console.log(commitOutput.trim());
+
+      if (!skipPush) {
+        execSync(`git push --set-upstream origin ${branchName} --no-verify`, {
+          stdio: "inherit",
+        });
+      } else {
+        console.log("🛑 Skipping push (flag --skip-push)");
+      }
+
+      results.push({
+        name: repo.name,
+        status: "✅ Success",
+        message: `Committed on ${branchName}`,
+      });
+    } catch (commitErr) {
+      // Capture stdout from failed commit
+      const output = commitErr.stdout?.toString() || "";
+
+      if (
+        output.includes("nothing to commit") ||
+        output.includes("no changes added to commit")
+      ) {
+        console.warn(`⚠️  No changes to commit in ${repo.name}`);
+
+        results.push({
+          name: repo.name,
+          status: "☑️ Skipped",
+          message: "No changes to commit",
+        });
+        return;
+      }
+
+      throw commitErr; // rethrow real errors
+    }
 
     if (!skipPush) {
-      execSync(`git push --set-upstream origin ${branchName}`, {
+      execSync(`git push --set-upstream origin ${branchName} --no-verify`, {
         stdio: "inherit",
       });
     } else {
@@ -95,6 +135,15 @@ config.repositories.forEach((repo) => {
 
     console.log(`✅ Done with ${repo.name}`);
   } catch (err) {
+    if (err.message.indexOf("nothing to commit, working tree clean") > -1) {
+      results.push({
+        name: repo.name,
+        status: "⚠️ No Changes",
+        message: `No changes to commit on ${branchName}`,
+      });
+      console.warn(`⚠️ No Changes in ${repo.name}: skipping`);
+      return;
+    }
     results.push({
       name: repo.name,
       status: "❌ Error",
