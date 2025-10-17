@@ -15,7 +15,6 @@ if (!fs.existsSync(logsDir)) {
 }
 
 const program = new Command();
-const results = [];
 
 program
   .name("batch")
@@ -55,8 +54,14 @@ async function handleRepos(
   packages,
   { dryRun, skipPush, parallel, verbose }
 ) {
+  const results = [];
   const config = JSON.parse(fs.readFileSync("repos.json", "utf-8"));
   const basePath = config.basePath;
+
+  if (!packages.length) {
+    console.error("❌ You must specify at least one package.");
+    process.exit(1);
+  }
 
   if (!basePath) {
     console.error('❌ Missing "basePath" in repos.json');
@@ -85,6 +90,10 @@ async function handleRepos(
     bar.start(config.repositories.length, 0, { repo: "" });
   }
 
+  if (verbose) {
+    console.log(`🔧 Processing ${repo.name} (${branchName})`);
+  }
+
   const limit = pLimit(concurrentCount);
 
   const tasks = config.repositories.map((repo) =>
@@ -100,8 +109,10 @@ async function handleRepos(
     )
   );
 
-  Promise.all(tasks).then(() => {
+  try {
+    await Promise.all(tasks);
+  } finally {
     bar.stop();
     printSummary(results);
-  });
+  }
 }
