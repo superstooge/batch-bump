@@ -25,7 +25,7 @@ async function processRepo(
 
   const writeLog = () => {
     fs.writeFileSync(logFile, log.join("\n"), "utf8");
-    return logFile;
+    return logFile; // absolute path
   };
 
   const run = async (cmd) => {
@@ -72,8 +72,59 @@ async function processRepo(
 
     // Checkout or create branch
     if (branchName) {
-      await git.checkout(["-B", branchName]);
-      log.push(`$ git checkout -B ${branchName}`);
+      try {
+        // If branch exists locally this will succeed and simply checkout
+        await git.checkout(branchName);
+        log.push(`$ git checkout ${branchName}`);
+      } catch (checkoutErr) {
+        // Branch doesn't exist locally — decide how to create it.
+        try {
+          // List local branches
+          const local = await git.branchLocal();
+          const hasLocal =
+            local && Array.isArray(local.all) && local.all.includes(branchName);
+
+          if (hasLocal) {
+            // shouldn't reach here because git.checkout would have worked, but safe-guard
+            await git.checkout(branchName);
+            log.push(`$ git checkout ${branchName} (already present locally)`);
+          } else {
+            // Inspect remote branches (returns array like ['origin/HEAD', 'origin/main', 'origin/chore/test'])
+            const remote = await git.branch(["-r"]);
+            const remoteHas =
+              remote &&
+              Array.isArray(remote.all) &&
+              remote.all.includes(`origin/${branchName}`);
+
+            if (remoteHas) {
+              // Create local branch that tracks origin/<branchName>
+              await git.checkout([
+                "--track",
+                "-b",
+                branchName,
+                `origin/${branchName}`,
+              ]);
+              log.push(
+                `$ git checkout --track -b ${branchName} origin/${branchName}`
+              );
+            } else {
+              // Remote doesn't have it either — create a local branch (from current HEAD)
+              await git.checkoutLocalBranch(branchName);
+              log.push(
+                `$ git checkout -b ${branchName} (created locally from current HEAD)`
+              );
+            }
+          }
+        } catch (createErr) {
+          // Record the error and rethrow so outer try/catch handles it
+          log.push(
+            `$ git checkout/create ${branchName} failed: ${
+              createErr.message || createErr
+            }`
+          );
+          throw createErr;
+        }
+      }
     }
 
     // Install or remove packages
@@ -89,7 +140,7 @@ async function processRepo(
     }: ${packages.join(", ")}`;
     try {
       await git.commit(commitMessage, { "--no-verify": null });
-      log.push(`$ git commit -m \"${commitMessage}\" --no-verify`);
+      log.push(`$ git commit -m "${commitMessage}" --no-verify`);
     } catch (commitErr) {
       const message = commitErr.message || "";
       if (
@@ -97,6 +148,7 @@ async function processRepo(
         message.includes("no changes added to commit")
       ) {
         const file = writeLog();
+
         if (verbose)
           console.warn(
             `⚠️  No changes to commit in ${repo.name} (log: ${file})`
@@ -104,7 +156,8 @@ async function processRepo(
         results.push({
           name: repo.name,
           status: "⚠️ Skipped",
-          message: `No changes to commit (log: ${path.basename(file)})`,
+          // include absolute path and file:// URL
+          message: `No changes to commit (log: ${file})`,
         });
         return;
       }
@@ -120,19 +173,24 @@ async function processRepo(
     }
 
     const file = writeLog();
+
     if (verbose) console.log(`📄 Log saved to ${file}`);
 
     results.push({
       name: repo.name,
       status: "✅ Success",
-      message: `Committed on ${branchName} (log: ${path.basename(file)})`,
+      // show absolute path and file:// URL so terminals/editors can link it
+      message: `Committed on ${branchName} (log: ${file})`,
     });
   } catch (err) {
     const file = writeLog();
+
     results.push({
       name: repo.name,
       status: "❌ Error",
-      message: `${err.message.split("\n")[0]} (log: ${path.basename(file)})`,
+      message: `${
+        err && err.message ? err.message.split("\n")[0] : String(err)
+      } (log: ${file})`,
     });
   }
 }
