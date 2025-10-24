@@ -28,7 +28,7 @@ program
   .argument("<packages...>", "Packages to install")
   .option("--dry-run", "Simulate the actions without executing them")
   .option("--skip-push", "Do everything except git push")
-  .option("--parallel", "Run tasks in parallel")
+  .option("--parallel", "Run tasks in parallel", true)
   .option("--verbose", "Enable verbose logging in the terminal")
   .action(async (packages, options) => {
     await handleRepos("install", packages, options);
@@ -41,7 +41,7 @@ program
   .argument("<packages...>", "Packages to remove")
   .option("--dry-run", "Simulate the actions without executing them")
   .option("--skip-push", "Do everything except git push")
-  .option("--parallel", "Run tasks in parallel")
+  .option("--parallel", "Run tasks in parallel", true)
   .option("--verbose", "Enable verbose logging in the terminal")
   .action(async (packages, options) => {
     await handleRepos("uninstall", packages, options);
