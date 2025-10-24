@@ -21,6 +21,10 @@ program
   .option("--verbose", "Print git output for each repo")
   .option("--branch <name>", "Branch to checkout/pull", "main")
   .option("--remote <name>", "Remote to pull from", "origin")
+  .option(
+    "--only <names>",
+    "Comma-separated list of repo names (as listed in repos.json) to process only"
+  )
   .parse(process.argv);
 
 const opts = program.opts();
@@ -41,6 +45,47 @@ const opts = program.opts();
     process.exit(1);
   }
 
+  // handle --only filtering
+  let selected = repos;
+  if (opts.only) {
+    const onlyList = opts.only
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (!onlyList.length) {
+      console.error("❌ --only provided but no repo names parsed");
+      process.exit(1);
+    }
+
+    // match by name or path (flexible)
+    const matched = repos.filter(
+      (r) => onlyList.includes(r.name) || onlyList.includes(r.path)
+    );
+
+    const foundNames = new Set(matched.map((r) => r.name || r.path));
+    const unknown = onlyList.filter((n) => !foundNames.has(n));
+
+    if (!matched.length) {
+      console.error(
+        `❌ None of the names passed to --only matched repos.json: ${onlyList.join(
+          ","
+        )}`
+      );
+      process.exit(1);
+    }
+
+    if (unknown.length) {
+      console.warn(
+        `⚠️ Warning: these names from --only were not found and will be ignored: ${unknown.join(
+          ", "
+        )}`
+      );
+    }
+
+    selected = matched;
+  }
+
   const concurrent = opts.parallel ? 5 : 1;
   const limit = pLimit(concurrent);
 
@@ -55,7 +100,7 @@ const opts = program.opts();
   );
 
   if (!opts.verbose) {
-    bar.start(repos.length, 0, { repo: "" });
+    bar.start(selected.length, 0, { repo: "" });
   }
 
   const results = [];
@@ -138,7 +183,7 @@ const opts = program.opts();
     }
   };
 
-  const tasks = repos.map((r) => limit(taskFor(r)));
+  const tasks = selected.map((r) => limit(taskFor(r)));
 
   try {
     await Promise.all(tasks);
@@ -148,12 +193,12 @@ const opts = program.opts();
     const failed = results.filter((r) => !r.ok);
     const succeeded = results.filter((r) => r.ok);
 
-    console.log("\nSummary:");
+    console.log("Summary:");
     console.log(`  ✅ succeeded: ${succeeded.length}`);
     console.log(`  ❌ failed:    ${failed.length}`);
 
     if (failed.length) {
-      console.log("\nFailures:");
+      console.log("Failures:");
       failed.forEach((f) => {
         console.log(` - ${f.repo}: ${f.error}`);
       });
