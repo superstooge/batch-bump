@@ -344,8 +344,6 @@ async function handleRepos(
         );
       } catch (err) {
         results.push({ repo: repoName, ok: false, error: err.message || err });
-      } finally {
-        if (!verbose) bar.increment();
       }
     })
   );
