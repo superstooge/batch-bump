@@ -1,30 +1,46 @@
 # 📦 batch-install-and-push
 
-A CLI tool to **bulk install or remove npm packages** across multiple repositories.
-Supports automatic branch creation, commits, pushes, logging, and optional parallel execution.
+A small CLI toolkit to **bulk install or remove npm packages** across multiple local repositories.
+
+This repo contains two scripts with clear responsibilities:
+
+- `sync.js` — fetches remote refs and pulls a branch **only if that branch already exists locally**. It does **not** create branches. Use it to refresh remote refs/branches.
+- `batch.js` — the main workflow: ensures the expected branch exists locally (creates it from `origin/<branch>` or falls back to `origin/main` / `main`), runs installs/removals, commits, and optionally pushes.
 
 ---
 
-## 🚀 Features
+## 🚀 Key differences (important)
 
-- ✅ Install or remove one or more packages in multiple repos
-- ✅ Automatically creates/checks out a branch per repo
-- ✅ Commits `package.json` and `package-lock.json` changes
-- ✅ Pushes changes to the specified branch (unless skipped)
-- ✅ Prints a summary table at the end
-- ✅ Supports `--dry-run` and `--skip-push`
-- ✅ Supports `--verbose` for terminal output
-- ✅ Supports `--parallel` execution (with concurrency limit)
-- ✅ Each repo has its own log file in `/logs`
+- `sync.js` will **never** create a new local branch. It only updates remote refs and pulls if the branch is already checked out locally. This is by design.
+- `batch.js` is responsible for creating the local branch (if missing) before performing package changes and pushing.
+- Both scripts support `--only` to limit work to a subset of repos listed in `repos.json`.
 
 ---
 
-## 📁 Project Structure
+## ✅ Features
+
+- Bulk install or remove packages in many repos
+- `--only` to target specific repositories (comma-separated list matching `name` or `path` in `repos.json`)
+- `batch.js` will create a local branch when missing:
+
+  - prefer `origin/<branch>` → create a tracking local branch
+  - else create locally from `origin/main` or local `main` as fallback
+
+- `--dry-run` shows what would be executed without changing repositories
+- `--skip-push` for disabling remote pushes when running `batch.js`
+- `--verbose` prints command output to the terminal
+- Optional parallel execution with a concurrency limit (defaults to sequential unless `--parallel` is provided)
+- Per-repo logs are written to `./logs/` (see `processRepo.js` behavior)
+
+---
+
+## 📁 Project structure
 
 ```
 .
-├── batch.js          # The CLI entry point
-├── processRepo.js    # Repo-level operations (git, npm, logs)
+├── batch.js          # The main CLI entry (creates local branches, installs, commits, pushes)
+├── sync.js           # Lightweight fetch/pull tool (does NOT create branches)
+├── processRepo.js    # Repo-level operations (git, npm, logging, push)
 ├── printSummary.js   # Summary table renderer
 ├── repos.json        # Repository config
 └── logs/             # Output logs per repo
@@ -32,101 +48,93 @@ Supports automatic branch creation, commits, pushes, logging, and optional paral
 
 ---
 
-## 🧾 `repos.json` Format
+## 🧾 `repos.json` format
 
 ```json
 {
-  "basePath": "/Users/<your-username>/Projects/",
+  "basePath": "/Users/<you>/Projects/",
   "repositories": [
-    {
-      "name": "repo-one",
-      "branch": "feat/dependency-update"
-    },
-    {
-      "name": "repo-two",
-      "branch": "feat/dependency-update"
-    }
+    { "name": "web-app1", "branch": "chore/test" },
+    { "name": "web-app2", "branch": "fix/bug" }
   ]
 }
 ```
 
-- `basePath`: Root folder where all your local repositories live
-- `name`: Folder name of each individual repository
-- `branch`: The branch to create and push to for each repo
+- `basePath` — root folder where your local repos live
+- `name` — folder name or identifier for the repo (used by `--only`)
+- `branch` — the branch `batch.js` should create/use for the change
+- optional per-repo `remote` may be used if you have a non-`origin` remote configured
 
 ---
 
 ## 🖥️ Usage
 
-From the root of this script repo:
+Run from the folder where these scripts and `repos.json` live.
 
-### Install packages (e.g. `lodash` and `dayjs`)
-
-```bash
-node batch install lodash dayjs
-```
-
-### Remove packages
+### Sync (fetch remote refs; do not create branches)
 
 ```bash
-node batch remove lodash dayjs
+# fetch refs for a single repo and attempt pull only if branch exists locally
+node sync.js --only=web-app1 --branch=main --verbose
+
+# fetch refs for all repos listed in repos.json (default branch = main)
+node sync.js --parallel --verbose
 ```
 
-### Aliases
+### Batch (create branch if needed, install/remove, commit, push)
 
 ```bash
-node batch i axios
-node batch rm react-query
+# Install packages in all repos
+node batch.js install lodash dayjs
+
+# Remove packages in a subset of repos
+node batch.js remove lodash --only=web-app1,web-app2
+
+# Aliases
+node batch.js i axios
+node batch.js rm react-query
 ```
 
----
-
-### ✅ Flags
-
-| Flag          | Description                                      |
-| ------------- | ------------------------------------------------ |
-| `--dry-run`   | Show what would be done, but don’t do it         |
-| `--skip-push` | Perform everything except `git push`             |
-| `--verbose`   | Print stdout/stderr to the terminal              |
-| `--parallel`  | Run tasks in parallel (default: concurrency = 5) |
-
-### Example
+### Examples with useful flags
 
 ```bash
-node batch i axios --skip-push --parallel --verbose
+# Dry run: see what would be done
+node batch.js install lodash --dry-run --only=web-app1
+
+# Verbose with parallel execution (concurrency controlled internally)
+node batch.js install lodash dayjs --parallel --verbose
+
+# Create branch and push (skip push if you only want to commit locally)
+node batch.js install lodash --verbose
+node batch.js install lodash --skip-push
 ```
 
 ---
 
-## 📄 Logs
+## 🔧 Flags summary
 
-- All output from `git` and `npm` is saved per repo under `./logs/<repo>.log`
-- Verbose mode will also mirror this output to the terminal
-
----
-
-## 📊 Summary Table
-
-At the end of execution, a summary will be printed showing:
-
-- Repo name
-- Status (✅, ❌, ⚠️, ☑️)
-- Message (branch info or log filename)
+| Flag              | Meaning                                                                                |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `--only <names>`  | Comma-separated repo names/paths to process (matches `name` or `path` in `repos.json`) |
+| `--dry-run`       | Show commands that would run, but do not perform changes                               |
+| `--skip-push`     | Do not `git push` after commit (only for `batch.js`)                                   |
+| `--verbose`       | Print `git`/`npm` output to terminal for debugging                                     |
+| `--parallel`      | Run tasks concurrently (useful for many repos)                                         |
+| `--branch <name>` | (sync.js) Branch to fetch/pull (default: `main`)                                       |
 
 ---
 
-## 🧠 Notes
+## 📝 Logs & summary
 
-- Uses `exec` (async) with `cwd` to safely run tasks concurrently
-- Avoids `process.chdir()` which is not safe in parallel
-- Automatically cleans up stale `.git/index.lock` files if needed
+- `processRepo.js` writes per-repo logs into `./logs/<repo>.log`.
+- At the end of `batch.js` execution a summary table lists each repo and its status (success / failure) and a short message.
 
 ---
 
-## 💬 Example Output
+## ⚠️ Important notes
 
-```
-📦 ███████░░░░░░░░░░ 50% | 4/8 | repo-three::feat/update
-📄 Log saved to logs/repo-three.log
-✅ Committed on feat/update (log: repo-three.log)
-```
+- `sync.js` intentionally does not create local branches. Use it for non-invasive remote refs updates and pulls.
+- `batch.js` will create local branches when needed (see behavior above). If you prefer to create branches manually, set the branch locally before running `batch.js`.
+- If authentication to remotes fails (SSH keys, tokens), `git fetch`/`pull` will error — run with `--verbose` to see full stderr and fix credentials.
+
+---
