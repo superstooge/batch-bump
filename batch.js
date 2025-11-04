@@ -162,90 +162,42 @@ async function handleRepos(
     return res.ok;
   };
 
-  const ensureBranchExists = async (
-    repoPath,
-    branch,
-    remote = "origin",
-    verboseFlag = false
-  ) => {
-    if (verboseFlag) console.log(`${repoPath}: git fetch ${remote} --prune`);
-    const f = await runCmd(`git -C "${repoPath}" fetch ${remote} --prune`);
-    if (!f.ok) {
-      if (verboseFlag)
-        console.error(`${repoPath}: fetch failed:`, f.error || f.stdout);
-      return false;
-    }
-
-    // local check
-    const localCheck = await runCmd(
-      `git -C "${repoPath}" show-ref --verify --quiet refs/heads/${branch}`
-    );
-    if (localCheck.ok) return true;
-
-    // remote check: is there origin/branch?
-    const remoteList = await runCmd(
-      `git -C "${repoPath}" branch -r --list ${remote}/${branch}`
-    );
-    const remoteHasBranch =
-      remoteList.ok && (remoteList.stdout || "").trim().length > 0;
-
-    if (remoteHasBranch) {
-      if (verboseFlag)
-        console.log(
-          `${repoPath}: creating local branch '${branch}' tracking ${remote}/${branch}`
-        );
-      const track = await runCmd(
-        `git -C "${repoPath}" checkout --track -b ${branch} ${remote}/${branch}`
-      );
-      if (track.ok) return true;
-
-      if (verboseFlag)
-        console.warn(
-          `${repoPath}: checkout --track failed, trying direct fetch into local branch`
-        );
-      const fetchRef = await runCmd(
-        `git -C "${repoPath}" fetch ${remote} refs/heads/${branch}:refs/heads/${branch}`
-      );
-      if (!fetchRef.ok) {
-        if (verboseFlag)
+  const ensureBranchFromLocalMain = async (repoPath, branchName, verbose) => {
+    const run = (cmd) =>
+      runCmd(`git -C "${repoPath}" ${cmd}`).then((res) => {
+        if (!res.ok && verbose) {
           console.error(
-            `${repoPath}: fetch-ref failed:`,
-            fetchRef.error || fetchRef.stdout
+            `[${repoPath}] ❌ ${cmd} failed:\n`,
+            res.error || res.stdout
           );
-        return false;
-      }
-      const co = await runCmd(`git -C "${repoPath}" checkout ${branch}`);
-      if (co.ok) return true;
-      if (verboseFlag)
-        console.error(
-          `${repoPath}: checkout after fetch-ref failed:`,
-          co.error || co.stdout
+        }
+        return res.ok;
+      });
+
+    // Check if branch already exists
+    const exists = await run(`rev-parse --verify ${branchName}`);
+    if (exists) {
+      if (verbose)
+        console.log(
+          `[${repoPath}] ✅ Branch ${branchName} already exists locally`
         );
-      return false;
+      return true;
     }
 
-    // remote doesn't have the branch — create locally from origin/main if possible
-    if (verboseFlag)
+    if (verbose)
       console.log(
-        `${repoPath}: remote doesn't have ${branch}; attempting to create from ${remote}/main`
+        `[${repoPath}] 🆕 Creating branch '${branchName}' from local main`
       );
-    await runCmd(
-      `git -C "${repoPath}" fetch ${remote} main:refs/remotes/${remote}/main`
-    ).catch(() => {});
-    const fromOriginMain = await runCmd(
-      `git -C "${repoPath}" checkout -b ${branch} ${remote}/main`
-    );
-    if (fromOriginMain.ok) return true;
 
-    // last fallback: create from local main
-    const fallback = await runCmd(
-      `git -C "${repoPath}" checkout main && git -C "${repoPath}" checkout -b ${branch}`
-    );
-    if (fallback.ok) return true;
+    // Fetch remote refs
+    await run(`fetch origin`);
 
-    if (verboseFlag)
-      console.error(`${repoPath}: failed to create branch ${branch}`);
-    return false;
+    // Fast-forward local main to match origin/main (but don't checkout it)
+    await run(`fetch origin main`);
+    await run(`branch --force main origin/main`);
+
+    // Create new local branch from updated main (without tracking)
+    return await run(`checkout --no-track -b ${branchName} main`);
   };
 
   const tasks = selected.map((repo) =>
@@ -297,12 +249,12 @@ async function handleRepos(
             return;
           }
 
-          const created = await ensureBranchExists(
+          const created = await ensureBranchFromLocalMain(
             repoPath,
             expectedBranch,
-            repo.remote || "origin",
             verbose
           );
+
           if (!created) {
             results.push({
               repo: repoName,
