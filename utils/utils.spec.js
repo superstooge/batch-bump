@@ -4,7 +4,7 @@ const {
   filterRepos,
   getRepoInfo,
   checkResults,
-} = require("./index");
+} = require("./utils");
 
 jest.mock("fs");
 

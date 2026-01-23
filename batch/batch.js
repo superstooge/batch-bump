@@ -3,10 +3,10 @@
 const fs = require("fs");
 const path = require("path");
 const { Command } = require("commander");
-const { printSummary } = require("./printSummary");
+const { printSummary } = require("../printSummary");
 const cliProgress = require("cli-progress");
 const pLimit = require("p-limit").default;
-const { processRepo } = require("./processRepo");
+const { processRepo } = require("../processRepo");
 const {
   runCmd,
   loadConfig: loadConfigUtil,
@@ -16,7 +16,7 @@ const {
   ensureLogsDir,
   checkResults,
   generateExecLogContent,
-} = require("./utils");
+} = require("../utils/utils");
 
 const program = new Command();
 
