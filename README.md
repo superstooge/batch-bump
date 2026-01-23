@@ -1,6 +1,6 @@
 # 📦 batch-install-and-push
 
-A small CLI toolkit to **bulk install or remove npm packages** across multiple local repositories.
+A small CLI toolkit to **bulk install or remove npm packages** and **execute any shell command** across multiple local repositories.
 
 This repo contains two scripts with clear responsibilities:
 
@@ -95,6 +95,22 @@ node batch.js i axios
 node batch.js rm react-query
 ```
 
+### Exec (run any shell command in all repos)
+
+```bash
+# Run any shell command across all repos
+node batch.js exec "git status"
+
+# Create GitHub PRs across repos (great after batch package changes)
+node batch.js exec "gh pr create --title 'feat: update dependencies' --base main"
+
+# Run commands in specific repos only
+node batch.js exec "npm outdated" --only=web-app1,web-app2
+
+# Check for uncommitted changes
+node batch.js exec "git diff --stat" --parallel --verbose
+```
+
 ### Examples with useful flags
 
 ```bash
@@ -107,6 +123,9 @@ node batch.js install lodash dayjs --parallel --verbose
 # Create branch and push (skip push if you only want to commit locally)
 node batch.js install lodash --verbose
 node batch.js install lodash --skip-push
+
+# Execute shell commands with dry run
+node batch.js exec "gh pr create --title 'fix: analytics'" --dry-run
 ```
 
 ---
@@ -117,10 +136,18 @@ node batch.js install lodash --skip-push
 | ----------------- | -------------------------------------------------------------------------------------- |
 | `--only <names>`  | Comma-separated repo names/paths to process (matches `name` or `path` in `repos.json`) |
 | `--dry-run`       | Show commands that would run, but do not perform changes                               |
-| `--skip-push`     | Do not `git push` after commit (only for `batch.js`)                                   |
-| `--verbose`       | Print `git`/`npm` output to terminal for debugging                                     |
+| `--skip-push`     | Do not `git push` after commit (only for `batch.js install/remove`)                    |
+| `--verbose`       | Print command output to terminal for debugging                                         |
 | `--parallel`      | Run tasks concurrently (useful for many repos)                                         |
 | `--branch <name>` | (sync.js) Branch to fetch/pull (default: `main`)                                       |
+
+## 🖥️ Commands summary
+
+| Command                  | Alias | Description                                |
+| ------------------------ | ----- | ------------------------------------------ |
+| `install <packages...>`  | `i`   | Install npm packages in all repos          |
+| `remove <packages...>`   | `rm`  | Remove npm packages from all repos         |
+| `exec <command...>`      | `run` | Execute any shell command in all repos     |
 
 ---
 
