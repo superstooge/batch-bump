@@ -5,3 +5,4 @@ node_modules
 logs
 repos.json
 .pnpm-store
+coverage

@@ -7,11 +7,97 @@ const { printSummary } = require("./printSummary");
 const cliProgress = require("cli-progress");
 const pLimit = require("p-limit").default;
 const { processRepo } = require("./processRepo");
-const util = require("util");
-const exec = require("child_process").exec;
-const execP = util.promisify(exec);
+const {
+  runCmd,
+  loadConfig: loadConfigUtil,
+  filterRepos: filterReposUtil,
+  getExecutionModeMessage,
+  getRepoInfo,
+  ensureLogsDir,
+  checkResults,
+  generateExecLogContent,
+} = require("./utils");
 
 const program = new Command();
+
+// ============================================================================
+// CLI Wrappers (handle process.exit for CLI usage)
+// ============================================================================
+
+/**
+ * Load config with CLI error handling
+ */
+function loadConfig() {
+  try {
+    return loadConfigUtil();
+  } catch (e) {
+    console.error(`❌ ${e.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Filter repos with CLI error handling
+ */
+function filterRepos(repos, only) {
+  try {
+    const { matched, unknown } = filterReposUtil(repos, only);
+    if (unknown.length) {
+      console.warn(
+        `⚠️ Warning: these names from --only were not found and will be ignored: ${unknown.join(", ")}`
+      );
+    }
+    return matched;
+  } catch (e) {
+    console.error(`❌ ${e.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Create a progress bar with standard configuration
+ */
+function createProgressBar(emoji = "📦") {
+  return new cliProgress.SingleBar(
+    {
+      format: `${emoji} {bar} {percentage}% | {value}/{total} | {repo}`,
+      barCompleteChar: "█",
+      barIncompleteChar: "░",
+      hideCursor: true,
+    },
+    cliProgress.Presets.shades_classic
+  );
+}
+
+/**
+ * Log execution mode (parallel vs sequential)
+ */
+function logExecutionMode(parallel, concurrentCount) {
+  console.log(`\n${getExecutionModeMessage(parallel, concurrentCount)}\n`);
+}
+
+/**
+ * Cleanup and exit with appropriate code
+ */
+function finishAndExit(bar, results, failCheck) {
+  try {
+    bar.stop();
+  } catch (e) {
+    /* noop */
+  }
+
+  printSummary(results);
+
+  const { exitCode } = checkResults(results, failCheck);
+
+  try {
+    process.stdin.pause();
+  } catch (e) {
+    /* noop */
+  }
+
+  setImmediate(() => process.exit(exitCode));
+}
 
 program
   .name("batch")
@@ -73,103 +159,22 @@ async function handleRepos(
   { dryRun, skipPush, parallel, verbose, only }
 ) {
   const results = [];
-
-  let raw;
-  try {
-    raw = fs.readFileSync("repos.json", "utf-8");
-  } catch (e) {
-    console.error("❌ Could not read repos.json:", e.message);
-    process.exit(1);
-  }
-
-  let config;
-  try {
-    config = JSON.parse(raw);
-  } catch (e) {
-    console.error("❌ repos.json is not valid JSON:", e.message);
-    process.exit(1);
-  }
-
-  const basePath = config.basePath;
-  const repos = config.repositories || [];
+  const { basePath, repos } = loadConfig();
 
   if (!packages || !packages.length) {
     console.error("❌ You must specify at least one package.");
     process.exit(1);
   }
 
-  if (!basePath) {
-    console.error('❌ Missing "basePath" in repos.json');
-    process.exit(1);
-  }
-
-  // --only filtering
-  let selected = repos;
-  if (only) {
-    const onlyList = String(only)
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!onlyList.length) {
-      console.error("❌ --only provided but no repo names parsed");
-      process.exit(1);
-    }
-    const matched = repos.filter(
-      (r) => onlyList.includes(r.name) || onlyList.includes(r.path)
-    );
-    const foundNames = new Set(matched.map((r) => r.name || r.path));
-    const unknown = onlyList.filter((n) => !foundNames.has(n));
-    if (!matched.length) {
-      console.error(
-        `❌ None of the names passed to --only matched repos.json: ${onlyList.join(
-          ","
-        )}`
-      );
-      process.exit(1);
-    }
-    if (unknown.length)
-      console.warn(
-        `⚠️ Warning: these names from --only were not found and will be ignored: ${unknown.join(
-          ", "
-        )}`
-      );
-    selected = matched;
-  }
-
-  const bar = new cliProgress.SingleBar(
-    {
-      format: "📦 {bar} {percentage}% | {value}/{total} | {repo}",
-      barCompleteChar: "█",
-      barIncompleteChar: "░",
-      hideCursor: true,
-    },
-    cliProgress.Presets.shades_classic
-  );
-
+  const selected = filterRepos(repos, only);
+  const bar = createProgressBar("📦");
   const concurrentCount = parallel ? 5 : 1;
-  console.warn(
-    `\n\r ${
-      parallel ? "⚡ Running in parallel mode" : "🐢 Running in sequential mode"
-    }${parallel ? `: concurrent tasks limit is ${concurrentCount}` : ""}\n\r`
-  );
+
+  logExecutionMode(parallel, concurrentCount);
 
   if (!verbose) bar.start(selected.length, 0, { repo: "" });
 
   const limit = pLimit(concurrentCount);
-
-  const runCmd = async (cmd, execOpts = {}) => {
-    const optsWithBuffer = { maxBuffer: 10 * 1024 * 1024, ...execOpts };
-    try {
-      const r = await execP(cmd, optsWithBuffer);
-      return { ok: true, stdout: r.stdout || "", stderr: r.stderr || "" };
-    } catch (err) {
-      return {
-        ok: false,
-        stdout: err.stdout || "",
-        error: err.stderr || err.message,
-      };
-    }
-  };
 
   const localBranchExists = async (repoPath, branch) => {
     const cmd = `git -C "${repoPath}" show-ref --verify --quiet refs/heads/${branch}`;
@@ -177,10 +182,10 @@ async function handleRepos(
     return res.ok;
   };
 
-  const ensureBranchFromLocalMain = async (repoPath, branchName, verbose) => {
+  const ensureBranchFromLocalMain = async (repoPath, branchName, isVerbose) => {
     const run = (cmd) =>
       runCmd(`git -C "${repoPath}" ${cmd}`).then((res) => {
-        if (!res.ok && verbose) {
+        if (!res.ok && isVerbose) {
           console.error(
             `[${repoPath}] ❌ ${cmd} failed:\n`,
             res.error || res.stdout
@@ -192,14 +197,14 @@ async function handleRepos(
     // Check if branch already exists
     const exists = await run(`rev-parse --verify ${branchName}`);
     if (exists) {
-      if (verbose)
+      if (isVerbose)
         console.log(
           `[${repoPath}] ✅ Branch ${branchName} already exists locally`
         );
       return true;
     }
 
-    if (verbose)
+    if (isVerbose)
       console.log(
         `[${repoPath}] 🆕 Creating branch '${branchName}' from local main`
       );
@@ -217,11 +222,7 @@ async function handleRepos(
 
   const tasks = selected.map((repo) =>
     limit(async () => {
-      const repoName = repo.name || repo.path || JSON.stringify(repo);
-      const repoPath = path.resolve(
-        basePath,
-        repo.path || repo.name || repoName
-      );
+      const { repoName, repoPath } = getRepoInfo(repo, basePath);
 
       if (!verbose) bar.update({ repo: repoName });
 
@@ -289,8 +290,6 @@ async function handleRepos(
       // call processRepo
       try {
         if (dryRun) {
-          // gather the commands processRepo would run by calling it in a mode it supports
-          // but to keep this simple, we just note dry-run and skip calling processRepo
           results.push({
             repo: repoName,
             ok: true,
@@ -318,146 +317,35 @@ async function handleRepos(
   try {
     await Promise.all(tasks);
   } finally {
-    try {
-      bar.stop();
-    } catch (e) {
-      /** nada */
-    }
-
-    printSummary(results);
-
-    const failed = results.filter((r) => !r.ok);
-    if (failed.length) {
-      try {
-        process.stdin.pause();
-      } catch (e) {}
-      setImmediate(() => process.exit(2));
-    }
-
-    try {
-      process.stdin.pause();
-    } catch (e) {}
-    setImmediate(() => process.exit(0));
+    finishAndExit(bar, results, (r) => !r.ok);
   }
 }
 
 async function handleExec(commandParts, { dryRun, parallel, verbose, only }) {
   const results = [];
-
-  // Join command parts into a single command string
   const command = commandParts.join(" ");
-
-  let raw;
-  try {
-    raw = fs.readFileSync("repos.json", "utf-8");
-  } catch (e) {
-    console.error("❌ Could not read repos.json:", e.message);
-    process.exit(1);
-  }
-
-  let config;
-  try {
-    config = JSON.parse(raw);
-  } catch (e) {
-    console.error("❌ repos.json is not valid JSON:", e.message);
-    process.exit(1);
-  }
-
-  const basePath = config.basePath;
-  const repos = config.repositories || [];
+  const { basePath, repos } = loadConfig();
 
   if (!command) {
     console.error("❌ You must specify a command to execute.");
     process.exit(1);
   }
 
-  if (!basePath) {
-    console.error('❌ Missing "basePath" in repos.json');
-    process.exit(1);
-  }
-
-  // --only filtering
-  let selected = repos;
-  if (only) {
-    const onlyList = String(only)
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!onlyList.length) {
-      console.error("❌ --only provided but no repo names parsed");
-      process.exit(1);
-    }
-    const matched = repos.filter(
-      (r) => onlyList.includes(r.name) || onlyList.includes(r.path)
-    );
-    const foundNames = new Set(matched.map((r) => r.name || r.path));
-    const unknown = onlyList.filter((n) => !foundNames.has(n));
-    if (!matched.length) {
-      console.error(
-        `❌ None of the names passed to --only matched repos.json: ${onlyList.join(
-          ","
-        )}`
-      );
-      process.exit(1);
-    }
-    if (unknown.length)
-      console.warn(
-        `⚠️ Warning: these names from --only were not found and will be ignored: ${unknown.join(
-          ", "
-        )}`
-      );
-    selected = matched;
-  }
-
-  const bar = new cliProgress.SingleBar(
-    {
-      format: "🚀 {bar} {percentage}% | {value}/{total} | {repo}",
-      barCompleteChar: "█",
-      barIncompleteChar: "░",
-      hideCursor: true,
-    },
-    cliProgress.Presets.shades_classic
-  );
-
+  const selected = filterRepos(repos, only);
+  const bar = createProgressBar("🚀");
   const concurrentCount = parallel ? 5 : 1;
+  const logsDir = ensureLogsDir();
+
   console.log(`\n📋 Command: ${command}`);
-  console.log(
-    `${
-      parallel ? "⚡ Running in parallel mode" : "🐢 Running in sequential mode"
-    }${parallel ? `: concurrent tasks limit is ${concurrentCount}` : ""}\n`
-  );
+  logExecutionMode(parallel, concurrentCount);
 
   if (!verbose) bar.start(selected.length, 0, { repo: "" });
 
   const limit = pLimit(concurrentCount);
 
-  const runCmd = async (cmd, execOpts = {}) => {
-    const optsWithBuffer = { maxBuffer: 10 * 1024 * 1024, ...execOpts };
-    try {
-      const r = await execP(cmd, optsWithBuffer);
-      return { ok: true, stdout: r.stdout || "", stderr: r.stderr || "" };
-    } catch (err) {
-      return {
-        ok: false,
-        stdout: err.stdout || "",
-        stderr: err.stderr || "",
-        error: err.stderr || err.message,
-        code: err.code,
-      };
-    }
-  };
-
-  // Create logs directory
-  const logsDir = path.resolve(__dirname, "logs");
-  if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir);
-
   const tasks = selected.map((repo) =>
     limit(async () => {
-      const repoName = repo.name || repo.path || JSON.stringify(repo);
-      const repoPath = path.resolve(
-        basePath,
-        repo.path || repo.name || repoName
-      );
+      const { repoName, repoPath } = getRepoInfo(repo, basePath);
 
       if (!verbose) bar.update({ repo: repoName });
 
@@ -488,17 +376,7 @@ async function handleExec(commandParts, { dryRun, parallel, verbose, only }) {
 
       // Write log file
       const logFile = path.resolve(logsDir, `${repoName}-exec.log`);
-      const logContent = [
-        `Command: ${command}`,
-        `Directory: ${repoPath}`,
-        `Exit code: ${res.ok ? 0 : res.code || 1}`,
-        "",
-        "--- stdout ---",
-        res.stdout || "(empty)",
-        "",
-        "--- stderr ---",
-        res.stderr || "(empty)",
-      ].join("\n");
+      const logContent = generateExecLogContent(command, repoPath, res);
       fs.writeFileSync(logFile, logContent, "utf8");
 
       if (verbose) {
@@ -528,25 +406,6 @@ async function handleExec(commandParts, { dryRun, parallel, verbose, only }) {
   try {
     await Promise.all(tasks);
   } finally {
-    try {
-      bar.stop();
-    } catch (e) {
-      /** nada */
-    }
-
-    printSummary(results);
-
-    const failed = results.filter((r) => r.status.includes("Error"));
-    if (failed.length) {
-      try {
-        process.stdin.pause();
-      } catch (e) {}
-      setImmediate(() => process.exit(2));
-    }
-
-    try {
-      process.stdin.pause();
-    } catch (e) {}
-    setImmediate(() => process.exit(0));
+    finishAndExit(bar, results, (r) => r.status.includes("Error"));
   }
 }
