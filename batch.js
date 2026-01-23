@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const readline = require("readline");
 const { Command } = require("commander");
 const { printSummary } = require("./printSummary");
 const cliProgress = require("cli-progress");
@@ -11,11 +12,37 @@ const util = require("util");
 const exec = require("child_process").exec;
 const execP = util.promisify(exec);
 
+/**
+ * Prompt user to select a package manager
+ * @returns {Promise<string>} "npm" or "pnpm"
+ */
+async function promptPackageManager() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question("Select package manager (npm/pnpm) [pnpm]: ", (answer) => {
+      rl.close();
+      const trimmed = answer.trim().toLowerCase();
+      if (trimmed === "npm") {
+        resolve("npm");
+      } else if (trimmed === "pnpm" || trimmed === "") {
+        resolve("pnpm");
+      } else {
+        console.warn(`⚠️  Unknown package manager "${trimmed}", defaulting to pnpm`);
+        resolve("pnpm");
+      }
+    });
+  });
+}
+
 const program = new Command();
 
 program
   .name("batch")
-  .description("Bulk install/remove npm packages across multiple repos")
+  .description("Bulk install/remove packages across multiple repos")
   .version("1.0.0")
   .option(
     "--only <names>",
@@ -57,6 +84,9 @@ async function handleRepos(
   packages,
   { dryRun, skipPush, parallel, verbose, only }
 ) {
+  // Prompt user to select package manager
+  const packageManager = await promptPackageManager();
+  console.log(`\n📦 Using package manager: ${packageManager}\n`);
   const results = [];
 
   let raw;
@@ -290,7 +320,7 @@ async function handleRepos(
           repo,
           command,
           packages,
-          { dryRun, skipPush, bar, verbose },
+          { dryRun, skipPush, bar, verbose, packageManager },
           basePath,
           results
         );

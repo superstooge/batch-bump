@@ -1,6 +1,6 @@
 # 📦 batch-install-and-push
 
-A small CLI toolkit to **bulk install or remove npm packages** across multiple local repositories.
+A small CLI toolkit to **bulk install or remove packages** across multiple local repositories using npm or pnpm.
 
 This repo contains two scripts with clear responsibilities:
 
@@ -84,7 +84,7 @@ node sync.js --parallel --verbose
 ### Batch (create branch if needed, install/remove, commit, push)
 
 ```bash
-# Install packages in all repos
+# Install packages in all repos (prompts for package manager, defaults to pnpm)
 node batch.js install lodash dayjs
 
 # Remove packages in a subset of repos
@@ -94,6 +94,12 @@ node batch.js remove lodash --only=web-app1,web-app2
 node batch.js i axios
 node batch.js rm react-query
 ```
+
+When you run a batch command, you'll be prompted to select a package manager:
+```
+Select package manager (npm/pnpm) [pnpm]:
+```
+Press Enter to use pnpm (default) or type `npm` and press Enter to use npm.
 
 ### Examples with useful flags
 
@@ -118,7 +124,7 @@ node batch.js install lodash --skip-push
 | `--only <names>`  | Comma-separated repo names/paths to process (matches `name` or `path` in `repos.json`) |
 | `--dry-run`       | Show commands that would run, but do not perform changes                               |
 | `--skip-push`     | Do not `git push` after commit (only for `batch.js`)                                   |
-| `--verbose`       | Print `git`/`npm` output to terminal for debugging                                     |
+| `--verbose`       | Print `git`/package manager output to terminal for debugging                           |
 | `--parallel`      | Run tasks concurrently (useful for many repos)                                         |
 | `--branch <name>` | (sync.js) Branch to fetch/pull (default: `main`)                                       |
 

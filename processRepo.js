@@ -8,7 +8,7 @@ async function processRepo(
   repo,
   command,
   packages,
-  { dryRun, skipPush, bar, verbose },
+  { dryRun, skipPush, bar, verbose, packageManager = "pnpm" },
   basePath,
   results
 ) {
@@ -128,11 +128,12 @@ async function processRepo(
     }
 
     // Install or remove packages
-    await run(`npm ${command} ${packages.join(" ")}`);
+    await run(`${packageManager} ${command} ${packages.join(" ")}`);
 
-    // Add files
-    await git.add(["package.json", "package-lock.json"]);
-    log.push("$ git add package.json package-lock.json");
+    // Add files (use correct lockfile based on package manager)
+    const pkgLockFile = packageManager === "pnpm" ? "pnpm-lock.yaml" : "package-lock.json";
+    await git.add(["package.json", pkgLockFile]);
+    log.push(`$ git add package.json ${pkgLockFile}`);
 
     // Commit changes
     const commitMessage = `${
