@@ -128,11 +128,11 @@ async function processRepo(
     }
 
     // Install or remove packages
-    await run(`npm ${command} ${packages.join(" ")}`);
+    await run(`pnpm ${command} ${packages.join(" ")}`);
 
     // Add files
-    await git.add(["package.json", "package-lock.json"]);
-    log.push("$ git add package.json package-lock.json");
+    await git.add(["package.json", "pnpm-lock.yaml"]);
+    log.push("$ git add package.json pnpm-lock.yaml");
 
     // Commit changes
     const commitMessage = `${
