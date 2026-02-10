@@ -4,3 +4,5 @@ node_modules
 .vscode
 logs
 repos.json
+.pnpm-store
+coverage
