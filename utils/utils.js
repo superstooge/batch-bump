@@ -84,14 +84,14 @@ function filterRepos(repos, only) {
   }
 
   const matched = repos.filter(
-    (r) => onlyList.includes(r.name) || onlyList.includes(r.path)
+    (r) => onlyList.includes(r.name) || onlyList.includes(r.path),
   );
   const foundNames = new Set(matched.map((r) => r.name || r.path));
   const unknown = onlyList.filter((n) => !foundNames.has(n));
 
   if (!matched.length) {
     const error = new Error(
-      `None of the names passed to --only matched repos.json: ${onlyList.join(",")}`
+      `None of the names passed to --only matched repos.json: ${onlyList.join(",")}`,
     );
     error.code = "FILTER_NO_MATCH";
     throw error;

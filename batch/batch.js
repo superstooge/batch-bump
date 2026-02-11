@@ -44,7 +44,7 @@ function filterRepos(repos, only) {
     const { matched, unknown } = filterReposUtil(repos, only);
     if (unknown.length) {
       console.warn(
-        `⚠️ Warning: these names from --only were not found and will be ignored: ${unknown.join(", ")}`
+        `⚠️ Warning: these names from --only were not found and will be ignored: ${unknown.join(", ")}`,
       );
     }
     return matched;
@@ -65,7 +65,7 @@ function createProgressBar(emoji = "📦") {
       barIncompleteChar: "░",
       hideCursor: true,
     },
-    cliProgress.Presets.shades_classic
+    cliProgress.Presets.shades_classic,
   );
 }
 
@@ -102,12 +102,12 @@ function finishAndExit(bar, results, failCheck) {
 program
   .name("batch")
   .description(
-    "Bulk operations across multiple repos: install/remove npm packages or execute any shell command"
+    "Bulk operations across multiple repos: install/remove npm packages or execute any shell command",
   )
   .version("1.0.0")
   .option(
     "--only <names>",
-    "Comma-separated list of repo names/paths (as listed in repos.json) to process only"
+    "Comma-separated list of repo names/paths (as listed in repos.json) to process only",
   );
 
 program
@@ -156,7 +156,7 @@ program.parse(process.argv);
 async function handleRepos(
   command,
   packages,
-  { dryRun, skipPush, parallel, verbose, only }
+  { dryRun, skipPush, parallel, verbose, only },
 ) {
   const results = [];
   const { basePath, repos } = loadConfig();
@@ -188,7 +188,7 @@ async function handleRepos(
         if (!res.ok && isVerbose) {
           console.error(
             `[${repoPath}] ❌ ${cmd} failed:\n`,
-            res.error || res.stdout
+            res.error || res.stdout,
           );
         }
         return res.ok;
@@ -199,14 +199,14 @@ async function handleRepos(
     if (exists) {
       if (isVerbose)
         console.log(
-          `[${repoPath}] ✅ Branch ${branchName} already exists locally`
+          `[${repoPath}] ✅ Branch ${branchName} already exists locally`,
         );
       return true;
     }
 
     if (isVerbose)
       console.log(
-        `[${repoPath}] 🆕 Creating branch '${branchName}' from local main`
+        `[${repoPath}] 🆕 Creating branch '${branchName}' from local main`,
       );
 
     // Fetch remote refs
@@ -251,7 +251,7 @@ async function handleRepos(
         if (!existsLocally) {
           if (verbose)
             console.log(
-              `${repoName}: branch ${expectedBranch} not found locally — creating it locally`
+              `${repoName}: branch ${expectedBranch} not found locally — creating it locally`,
             );
 
           if (dryRun) {
@@ -268,7 +268,7 @@ async function handleRepos(
           const created = await ensureBranchFromLocalMain(
             repoPath,
             expectedBranch,
-            verbose
+            verbose,
           );
 
           if (!created) {
@@ -279,7 +279,7 @@ async function handleRepos(
             });
             if (verbose)
               console.error(
-                `${repoName}: failed to create branch ${expectedBranch}`
+                `${repoName}: failed to create branch ${expectedBranch}`,
               );
             if (!verbose) bar.increment();
             return;
@@ -306,18 +306,18 @@ async function handleRepos(
           packages,
           { dryRun, skipPush, bar, verbose },
           basePath,
-          results
+          results,
         );
       } catch (err) {
         results.push({ repo: repoName, ok: false, error: err.message || err });
       }
-    })
+    }),
   );
 
   try {
     await Promise.all(tasks);
   } finally {
-    finishAndExit(bar, results, (r) => !r.ok);
+    finishAndExit(bar, results, (r) => r.status.includes("Error"));
   }
 }
 
@@ -400,7 +400,7 @@ async function handleExec(commandParts, { dryRun, parallel, verbose, only }) {
       }
 
       if (!verbose) bar.increment();
-    })
+    }),
   );
 
   try {
