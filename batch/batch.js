@@ -206,18 +206,18 @@ async function handleRepos(
 
     if (isVerbose)
       console.log(
-        `[${repoPath}] 🆕 Creating branch '${branchName}' from local main`,
+        `[${repoPath}] 🆕 Creating branch '${branchName}' from origin/main`,
       );
 
-    // Fetch remote refs
-    await run(`fetch origin`);
+    // Refresh and validate origin/main before branch creation.
+    const fetchedMain = await run(`fetch origin main`);
+    if (!fetchedMain) return false;
 
-    // Fast-forward local main to match origin/main (but don't checkout it)
-    await run(`fetch origin main`);
-    await run(`branch --force main origin/main`);
+    const hasOriginMain = await run(`rev-parse --verify refs/remotes/origin/main`);
+    if (!hasOriginMain) return false;
 
-    // Create new local branch from updated main (without tracking)
-    return await run(`checkout --no-track -b ${branchName} main`);
+    // Create new local branch from fresh origin/main (without tracking)
+    return await run(`checkout --no-track -b ${branchName} origin/main`);
   };
 
   const tasks = selected.map((repo) =>
@@ -325,6 +325,7 @@ async function handleExec(commandParts, { dryRun, parallel, verbose, only }) {
   const results = [];
   const command = commandParts.join(" ");
   const { basePath, repos } = loadConfig();
+  const runStamp = new Date().toISOString().replace(/[:.]/g, "-");
 
   if (!command) {
     console.error("❌ You must specify a command to execute.");
@@ -375,7 +376,7 @@ async function handleExec(commandParts, { dryRun, parallel, verbose, only }) {
       const res = await runCmd(command, { cwd: repoPath });
 
       // Write log file
-      const logFile = path.resolve(logsDir, `${repoName}-exec.log`);
+      const logFile = path.resolve(logsDir, `${repoName}-exec-${runStamp}.log`);
       const logContent = generateExecLogContent(command, repoPath, res);
       fs.writeFileSync(logFile, logContent, "utf8");
 

@@ -12,6 +12,7 @@ async function processRepo(
   basePath,
   results
 ) {
+  const runStamp = new Date().toISOString().replace(/[:.]/g, "-");
   const repoPath = path.resolve(basePath, repo.name);
   const branchName = repo.branch;
   const git = simpleGit(repoPath);
@@ -21,7 +22,7 @@ async function processRepo(
   const log = [];
   const logsDir = path.resolve(__dirname, "logs");
   if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir);
-  const logFile = path.resolve(logsDir, `${repo.name}.log`);
+  const logFile = path.resolve(logsDir, `${repo.name}-${runStamp}.log`);
 
   const writeLog = () => {
     fs.writeFileSync(logFile, log.join("\n"), "utf8");
@@ -89,6 +90,10 @@ async function processRepo(
             await git.checkout(branchName);
             log.push(`$ git checkout ${branchName} (already present locally)`);
           } else {
+            // Refresh remote refs before checking whether remote branch exists.
+            await git.fetch("origin");
+            log.push("$ git fetch origin");
+
             // Inspect remote branches (returns array like ['origin/HEAD', 'origin/main', 'origin/chore/test'])
             const remote = await git.branch(["-r"]);
             const remoteHas =
@@ -108,10 +113,13 @@ async function processRepo(
                 `$ git checkout --track -b ${branchName} origin/${branchName}`
               );
             } else {
-              // Remote doesn't have it either — create a local branch (from current HEAD)
-              await git.checkoutLocalBranch(branchName);
+              // Remote doesn't have it either — create from fresh origin/main.
+              await git.fetch("origin", "main");
+              log.push("$ git fetch origin main");
+
+              await git.checkout(["--no-track", "-b", branchName, "origin/main"]);
               log.push(
-                `$ git checkout -b ${branchName} (created locally from current HEAD)`
+                `$ git checkout --no-track -b ${branchName} origin/main`
               );
             }
           }
