@@ -317,13 +317,15 @@ async function handleRepos(
   try {
     await Promise.all(tasks);
   } finally {
-    finishAndExit(bar, results, (r) => r.status.includes("Error"));
+    finishAndExit(bar, results, (r) => r.status?.includes("Error"));
   }
 }
 
 async function handleExec(commandParts, { dryRun, parallel, verbose, only }) {
   const results = [];
+  const prLinks = [];
   const command = commandParts.join(" ");
+  const isPrCreate = /\bgh\s+pr\s+create\b/.test(command);
   const { basePath, repos } = loadConfig();
   const runStamp = new Date().toISOString().replace(/[:.]/g, "-");
 
@@ -392,6 +394,12 @@ async function handleExec(commandParts, { dryRun, parallel, verbose, only }) {
           status: "✅ Success",
           message: `Executed successfully (log: ${logFile})`,
         });
+
+        if (isPrCreate) {
+          const prLink = (res.stdout.match(/https?:\/\/\S*\/pull\/\d+/) ||
+            [])[0];
+          if (prLink) prLinks.push({ repo: repoName, prLink });
+        }
       } else {
         results.push({
           name: repoName,
@@ -407,6 +415,12 @@ async function handleExec(commandParts, { dryRun, parallel, verbose, only }) {
   try {
     await Promise.all(tasks);
   } finally {
+    if (isPrCreate && prLinks.length) {
+      console.log("\n🔗 Pull requests:");
+      for (const { repo, prLink } of prLinks) {
+        console.log(`${repo} ${prLink}`);
+      }
+    }
     finishAndExit(bar, results, (r) => r.status.includes("Error"));
   }
 }
