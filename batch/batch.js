@@ -370,6 +370,12 @@ async function handleExec(commandParts, { dryRun, parallel, verbose, only }) {
           message: `Would execute: ${command}`,
         });
         if (verbose) console.log(`${repoName}: would execute: ${command}`);
+        if (isPrCreate) {
+          prLinks.push({
+            repo: repoName,
+            prLink: `[dry-run] https://github.com/<owner>/${repoName}/pull/<n>`,
+          });
+        }
         if (!verbose) bar.increment();
         return;
       }
@@ -415,6 +421,14 @@ async function handleExec(commandParts, { dryRun, parallel, verbose, only }) {
   try {
     await Promise.all(tasks);
   } finally {
+    // Stop the progress bar before printing so its async redraw
+    // doesn't overwrite the PR links / summary output.
+    try {
+      bar.stop();
+    } catch (e) {
+      /* noop */
+    }
+
     if (isPrCreate && prLinks.length) {
       console.log("\n🔗 Pull requests:");
       for (const { repo, prLink } of prLinks) {
