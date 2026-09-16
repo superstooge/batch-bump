@@ -8,8 +8,10 @@ const cliProgress = require("cli-progress");
 const pLimit = require("p-limit").default;
 const { processRepo } = require("../processRepo");
 const {
+  DEFAULT_BASE_BRANCH,
   runCmd,
   loadConfig: loadConfigUtil,
+  resolveBaseBranch,
   filterRepos: filterReposUtil,
   getExecutionModeMessage,
   getRepoInfo,
@@ -119,6 +121,10 @@ program
   .option("--skip-push", "Do everything except git push")
   .option("--parallel", "Run tasks in parallel")
   .option("--verbose", "Enable verbose logging in the terminal")
+  .option(
+    "--base-branch <name>",
+    `Branch new branches are created from (default: ${DEFAULT_BASE_BRANCH})`,
+  )
   .action(async (packages, options) => {
     const merged = { ...program.opts(), ...options };
     await handleRepos("install", packages, merged);
@@ -133,6 +139,10 @@ program
   .option("--skip-push", "Do everything except git push")
   .option("--parallel", "Run tasks in parallel")
   .option("--verbose", "Enable verbose logging in the terminal")
+  .option(
+    "--base-branch <name>",
+    `Branch new branches are created from (default: ${DEFAULT_BASE_BRANCH})`,
+  )
   .action(async (packages, options) => {
     const merged = { ...program.opts(), ...options };
     await handleRepos("uninstall", packages, merged);
@@ -156,10 +166,10 @@ program.parse(process.argv);
 async function handleRepos(
   command,
   packages,
-  { dryRun, skipPush, parallel, verbose, only },
+  { dryRun, skipPush, parallel, verbose, only, baseBranch },
 ) {
   const results = [];
-  const { basePath, repos } = loadConfig();
+  const { basePath, repos, config } = loadConfig();
 
   if (!packages || !packages.length) {
     console.error("❌ You must specify at least one package.");
@@ -182,7 +192,19 @@ async function handleRepos(
     return res.ok;
   };
 
-  const ensureBranchFromLocalMain = async (repoPath, branchName, isVerbose) => {
+  /**
+   * Create `branchName` from the resolved base branch if it doesn't exist yet.
+   * @param {string} repoPath - Absolute path to the repo
+   * @param {string} branchName - Branch to ensure exists locally
+   * @param {{remote: string, branch: string, ref: string}} base - Resolved base branch
+   * @param {boolean} isVerbose - Print git failures to the terminal
+   */
+  const ensureBranchFromBase = async (
+    repoPath,
+    branchName,
+    base,
+    isVerbose,
+  ) => {
     const run = (cmd) =>
       runCmd(`git -C "${repoPath}" ${cmd}`).then((res) => {
         if (!res.ok && isVerbose) {
@@ -206,18 +228,18 @@ async function handleRepos(
 
     if (isVerbose)
       console.log(
-        `[${repoPath}] 🆕 Creating branch '${branchName}' from origin/main`,
+        `[${repoPath}] 🆕 Creating branch '${branchName}' from ${base.ref}`,
       );
 
-    // Refresh and validate origin/main before branch creation.
-    const fetchedMain = await run(`fetch origin main`);
-    if (!fetchedMain) return false;
+    // Refresh and validate the base branch before branch creation.
+    const fetched = await run(`fetch ${base.remote} ${base.branch}`);
+    if (!fetched) return false;
 
-    const hasOriginMain = await run(`rev-parse --verify refs/remotes/origin/main`);
-    if (!hasOriginMain) return false;
+    const hasBase = await run(`rev-parse --verify refs/remotes/${base.ref}`);
+    if (!hasBase) return false;
 
-    // Create new local branch from fresh origin/main (without tracking)
-    return await run(`checkout --no-track -b ${branchName} origin/main`);
+    // Create new local branch from the fresh base branch (without tracking)
+    return await run(`checkout --no-track -b ${branchName} ${base.ref}`);
   };
 
   const tasks = selected.map((repo) =>
@@ -240,6 +262,17 @@ async function handleRepos(
       // determine expected branch for this repo (from repos.json)
       const expectedBranch = repo.branch || repo.branchName || undefined;
 
+      // base branch new branches are created from (CLI → repo → config → default)
+      let base;
+      try {
+        base = resolveBaseBranch(repo, config, baseBranch);
+      } catch (e) {
+        results.push({ repo: repoName, ok: false, error: e.message });
+        if (verbose) console.error(`${repoName}: ${e.message}`);
+        if (!verbose) bar.increment();
+        return;
+      }
+
       if (expectedBranch) {
         let existsLocally = false;
         try {
@@ -259,15 +292,16 @@ async function handleRepos(
               repo: repoName,
               ok: true,
               dryRun: true,
-              info: `Would create branch ${expectedBranch} after fetching remote refs`,
+              info: `Would create branch ${expectedBranch} from ${base.ref} after fetching remote refs`,
             });
             if (!verbose) bar.increment();
             return;
           }
 
-          const created = await ensureBranchFromLocalMain(
+          const created = await ensureBranchFromBase(
             repoPath,
             expectedBranch,
+            base,
             verbose,
           );
 
@@ -304,7 +338,7 @@ async function handleRepos(
           repo,
           command,
           packages,
-          { dryRun, skipPush, bar, verbose },
+          { dryRun, skipPush, bar, verbose, base },
           basePath,
           results,
         );

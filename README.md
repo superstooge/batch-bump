@@ -24,7 +24,9 @@ This repo contains two scripts with clear responsibilities:
 - `batch/batch.js` will create a local branch when missing:
 
   - prefer `origin/<branch>` → create a tracking local branch
-  - else create locally from `origin/main` or local `main` as fallback
+  - else create locally from the **base branch** (default `origin/main`)
+
+- Configurable base branch via `--base-branch`, `repos.json` `baseBranch`, or per-repo `baseBranch`
 
 - `--dry-run` shows what would be executed without changing repositories
 - `--skip-push` for disabling remote pushes when running `batch/batch.js`
@@ -58,17 +60,33 @@ This repo contains two scripts with clear responsibilities:
 ```json
 {
   "basePath": "/Users/<you>/Projects/",
+  "baseBranch": "origin/main",
   "repositories": [
     { "name": "web-app1", "branch": "chore/test" },
-    { "name": "web-app2", "branch": "fix/bug" }
+    { "name": "web-app2", "branch": "fix/bug", "baseBranch": "develop" }
   ]
 }
 ```
 
 - `basePath` — root folder where your local repos live
+- `baseBranch` — branch new branches are created from, for **all** repos (default: `origin/main`)
 - `name` — folder name or identifier for the repo (used by `--only`)
 - `branch` — the branch `batch/batch.js` should create/use for the change
+- optional per-repo `baseBranch` overrides the top-level one for that repo
 - optional per-repo `remote` may be used if you have a non-`origin` remote configured
+
+### Base branch resolution
+
+Resolved in this order, first match wins:
+
+1. `--base-branch <name>` (CLI flag)
+2. `baseBranch` on the repo entry
+3. `baseBranch` at the top level of `repos.json`
+4. `origin/main` (default)
+
+The remote prefix is optional — `main` and `origin/main` are equivalent, and
+branch names containing slashes (`release/1.0`) are preserved. If a repo defines
+`remote`, the base branch and the push both use it instead of `origin`.
 
 ---
 
@@ -137,6 +155,10 @@ pnpm batch install lodash dayjs --parallel --verbose
 pnpm batch install lodash --verbose
 pnpm batch install lodash --skip-push
 
+# Branch off something other than origin/main for every repo in this run
+pnpm batch install lodash --base-branch=develop
+pnpm batch install lodash --base-branch=origin/release/1.0 --dry-run
+
 # Execute shell commands with dry run
 pnpm batch exec "gh pr create --title 'fix: analytics'" --dry-run
 ```
@@ -164,6 +186,7 @@ pnpm batch exec "gh pr create --title 'fix: analytics'" --dry-run
 | `--skip-push`     | Do not `git push` after commit (only for `batch/batch.js install/remove`)              |
 | `--verbose`       | Print command output to terminal for debugging                                         |
 | `--parallel`      | Run tasks concurrently (useful for many repos)                                         |
+| `--base-branch <name>` | (batch install/remove) Branch to create new branches from (default: `origin/main`) |
 | `--branch <name>` | (sync.js) Branch to fetch/pull (default: `main`)                                       |
 
 ## 🖥️ Commands summary
@@ -187,6 +210,7 @@ pnpm batch exec "gh pr create --title 'fix: analytics'" --dry-run
 
 - `sync.js` intentionally does not create local branches. Use it for non-invasive remote refs updates and pulls.
 - `batch/batch.js` will create local branches when needed (see behavior above). If you prefer to create branches manually, set the branch locally before running `batch/batch.js`.
+- The base branch must exist on the remote. If `origin/<baseBranch>` can't be found after fetching, that repo is reported as failed and left untouched — useful when a repo still uses `master` and needs a per-repo `baseBranch`.
 - If authentication to remotes fails (SSH keys, tokens), `git fetch`/`pull` will error — run with `--verbose` to see full stderr and fix credentials.
 
 ---
