@@ -3,18 +3,30 @@ const path = require("path");
 const util = require("util");
 const exec = util.promisify(require("child_process").exec);
 const simpleGit = require("simple-git");
+const { resolveBaseBranch } = require("./utils/utils");
 
+/**
+ * @param {object} repo - Repository entry from repos.json
+ * @param {string} command - "install" or "uninstall"
+ * @param {string[]} packages - Packages to install/remove
+ * @param {{dryRun?: boolean, skipPush?: boolean, bar: object, verbose?: boolean,
+ *          base?: {remote: string, branch: string, ref: string}}} options
+ *        `base` is the resolved base branch; falls back to the default when omitted.
+ * @param {string} basePath - Root folder containing the repos
+ * @param {Array} results - Accumulator for summary rows
+ */
 async function processRepo(
   repo,
   command,
   packages,
-  { dryRun, skipPush, bar, verbose },
+  { dryRun, skipPush, bar, verbose, base },
   basePath,
   results
 ) {
   const runStamp = new Date().toISOString().replace(/[:.]/g, "-");
   const repoPath = path.resolve(basePath, repo.name);
   const branchName = repo.branch;
+  const baseBranch = base || resolveBaseBranch(repo);
   const git = simpleGit(repoPath);
 
   bar.increment({ repo: `${repo.name}::${branchName}` });
@@ -54,7 +66,7 @@ async function processRepo(
       status: "☑️ DRY RUN",
       message: `Would ${command} ${packages.join(
         ", "
-      )} on branch ${branchName}`,
+      )} on branch ${branchName} (base: ${baseBranch.ref})`,
     });
     return;
   }
@@ -90,37 +102,32 @@ async function processRepo(
             await git.checkout(branchName);
             log.push(`$ git checkout ${branchName} (already present locally)`);
           } else {
+            const { remote: remoteName, branch: baseName, ref: baseRef } =
+              baseBranch;
+
             // Refresh remote refs before checking whether remote branch exists.
-            await git.fetch("origin");
-            log.push("$ git fetch origin");
+            await git.fetch(remoteName);
+            log.push(`$ git fetch ${remoteName}`);
 
             // Inspect remote branches (returns array like ['origin/HEAD', 'origin/main', 'origin/chore/test'])
             const remote = await git.branch(["-r"]);
+            const remoteRef = `${remoteName}/${branchName}`;
             const remoteHas =
               remote &&
               Array.isArray(remote.all) &&
-              remote.all.includes(`origin/${branchName}`);
+              remote.all.includes(remoteRef);
 
             if (remoteHas) {
-              // Create local branch that tracks origin/<branchName>
-              await git.checkout([
-                "--track",
-                "-b",
-                branchName,
-                `origin/${branchName}`,
-              ]);
-              log.push(
-                `$ git checkout --track -b ${branchName} origin/${branchName}`
-              );
+              // Create local branch that tracks <remote>/<branchName>
+              await git.checkout(["--track", "-b", branchName, remoteRef]);
+              log.push(`$ git checkout --track -b ${branchName} ${remoteRef}`);
             } else {
-              // Remote doesn't have it either — create from fresh origin/main.
-              await git.fetch("origin", "main");
-              log.push("$ git fetch origin main");
+              // Remote doesn't have it either — create from the fresh base branch.
+              await git.fetch(remoteName, baseName);
+              log.push(`$ git fetch ${remoteName} ${baseName}`);
 
-              await git.checkout(["--no-track", "-b", branchName, "origin/main"]);
-              log.push(
-                `$ git checkout --no-track -b ${branchName} origin/main`
-              );
+              await git.checkout(["--no-track", "-b", branchName, baseRef]);
+              log.push(`$ git checkout --no-track -b ${branchName} ${baseRef}`);
             }
           }
         } catch (createErr) {
@@ -174,8 +181,9 @@ async function processRepo(
 
     // Push changes if not skipped
     if (!skipPush) {
-      await git.push("origin", branchName, { "--no-verify": null });
-      log.push(`$ git push --set-upstream origin ${branchName} --no-verify`);
+      const { remote } = baseBranch;
+      await git.push(remote, branchName, { "--no-verify": null });
+      log.push(`$ git push --set-upstream ${remote} ${branchName} --no-verify`);
     } else {
       log.push("[skip-push] Skipped pushing to remote");
     }

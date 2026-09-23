@@ -1,6 +1,7 @@
 const fs = require("fs");
 const {
   loadConfig,
+  resolveBaseBranch,
   filterRepos,
   getRepoInfo,
   checkResults,
@@ -45,6 +46,77 @@ describe("loadConfig", () => {
     });
 
     expect(() => loadConfig()).toThrow();
+  });
+});
+
+describe("resolveBaseBranch", () => {
+  it("should default to origin/main when nothing is specified", () => {
+    expect(resolveBaseBranch()).toEqual({
+      remote: "origin",
+      branch: "main",
+      ref: "origin/main",
+    });
+  });
+
+  it("should use config.baseBranch when no repo or CLI value exists", () => {
+    expect(resolveBaseBranch({}, { baseBranch: "develop" }).ref).toBe(
+      "origin/develop"
+    );
+  });
+
+  it("should prefer repo.baseBranch over config.baseBranch", () => {
+    const result = resolveBaseBranch(
+      { baseBranch: "master" },
+      { baseBranch: "develop" }
+    );
+    expect(result.ref).toBe("origin/master");
+  });
+
+  it("should prefer the CLI value over repo and config", () => {
+    const result = resolveBaseBranch(
+      { baseBranch: "master" },
+      { baseBranch: "develop" },
+      "release"
+    );
+    expect(result.ref).toBe("origin/release");
+  });
+
+  it("should accept values written with the remote prefix", () => {
+    expect(resolveBaseBranch({}, {}, "origin/develop")).toEqual({
+      remote: "origin",
+      branch: "develop",
+      ref: "origin/develop",
+    });
+  });
+
+  it("should keep slashes in branch names that are not a remote prefix", () => {
+    expect(resolveBaseBranch({}, {}, "release/1.0")).toEqual({
+      remote: "origin",
+      branch: "release/1.0",
+      ref: "origin/release/1.0",
+    });
+  });
+
+  it("should honour a non-origin remote from the repo", () => {
+    const result = resolveBaseBranch(
+      { remote: "upstream", baseBranch: "upstream/main" },
+      {}
+    );
+    expect(result).toEqual({
+      remote: "upstream",
+      branch: "main",
+      ref: "upstream/main",
+    });
+  });
+
+  it("should trim surrounding whitespace", () => {
+    expect(resolveBaseBranch({}, {}, "  develop  ").ref).toBe(
+      "origin/develop"
+    );
+  });
+
+  it("should throw when the value is only a remote prefix", () => {
+    expect(() => resolveBaseBranch({}, {}, "origin/")).toThrow(/baseBranch/);
   });
 });
 

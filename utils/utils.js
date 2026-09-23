@@ -4,6 +4,12 @@ const util = require("util");
 const exec = require("child_process").exec;
 const execP = util.promisify(exec);
 
+/** Remote used when neither the repo nor the config names one. */
+const DEFAULT_REMOTE = "origin";
+
+/** Base branch new branches are created from when nothing is specified. */
+const DEFAULT_BASE_BRANCH = "origin/main";
+
 /**
  * Execute a shell command with increased buffer size
  * @param {string} cmd - Command to execute
@@ -29,7 +35,7 @@ async function runCmd(cmd, execOpts = {}) {
 /**
  * Load and validate repos.json configuration
  * @param {string} configPath - Path to repos.json (defaults to "repos.json")
- * @returns {{basePath: string, repos: Array}}
+ * @returns {{basePath: string, repos: Array, config: object}}
  * @throws {Error} If config is invalid
  */
 function loadConfig(configPath = "repos.json") {
@@ -60,7 +66,38 @@ function loadConfig(configPath = "repos.json") {
     throw error;
   }
 
-  return { basePath, repos };
+  return { basePath, repos, config };
+}
+
+/**
+ * Resolve the base branch a new branch should be created from.
+ *
+ * Precedence: CLI flag → repo.baseBranch → config.baseBranch → "origin/main".
+ * A value may be written with or without the remote prefix ("main" and
+ * "origin/main" are equivalent); only a prefix matching the resolved remote is
+ * stripped, so branch names containing slashes ("release/1.0") stay intact.
+ *
+ * @param {{baseBranch?: string, remote?: string}} [repo] - Repository entry from repos.json
+ * @param {{baseBranch?: string, remote?: string}} [config] - Top-level repos.json config
+ * @param {string} [cliBaseBranch] - Value of the --base-branch flag
+ * @returns {{remote: string, branch: string, ref: string}} Remote, bare branch name and full ref
+ */
+function resolveBaseBranch(repo = {}, config = {}, cliBaseBranch) {
+  const remote = repo.remote || config.remote || DEFAULT_REMOTE;
+  const raw = String(
+    cliBaseBranch || repo.baseBranch || config.baseBranch || DEFAULT_BASE_BRANCH,
+  ).trim();
+
+  const prefix = `${remote}/`;
+  const branch = raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
+
+  if (!branch) {
+    const error = new Error(`Invalid baseBranch: "${raw}"`);
+    error.code = "CONFIG_INVALID_BASE_BRANCH";
+    throw error;
+  }
+
+  return { remote, branch, ref: `${remote}/${branch}` };
 }
 
 /**
@@ -169,8 +206,11 @@ function generateExecLogContent(command, directory, result) {
 }
 
 module.exports = {
+  DEFAULT_REMOTE,
+  DEFAULT_BASE_BRANCH,
   runCmd,
   loadConfig,
+  resolveBaseBranch,
   filterRepos,
   getExecutionModeMessage,
   getRepoInfo,
